@@ -85,6 +85,9 @@ async def stream_response(update: Update, context: CallbackContext, response_gen
         cancel_clears_draft=True,
     ) as stream:
         answer = ""
+        n_input_tokens = 0
+        n_output_tokens = 0
+        n_first_dialog_messages_removed = 0
         async for gen_item in response_generator:
             (
                 delta,
@@ -112,6 +115,9 @@ async def group_stream_response(update: Update, context: CallbackContext, respon
             interval=1
     ) as stream:
         answer = ""
+        n_input_tokens = 0
+        n_output_tokens = 0
+        n_first_dialog_messages_removed = 0
         async for gen_item in response_generator:
             (
                 delta,
@@ -122,6 +128,21 @@ async def group_stream_response(update: Update, context: CallbackContext, respon
             answer += delta
 
         return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+
+
+def format_into_message(role: str, text: str, base64_image: Optional[str] = None):
+    if base64_image:
+        message = {
+            "role": role,
+            "content": [{"type": "text", "text": text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}}]
+        }
+    else:
+        message = {
+            "role": role,
+            "content": text
+        }
+    return message
 
 
 def split_text_into_chunks(text, chunk_size):
@@ -263,12 +284,20 @@ async def message_handle_fn(update: Update, context: CallbackContext, image_buff
 
         dialog_messages = db.get_dialog_messages(chat_id, message_thread_id)
 
+        base64_image = None
+        if image_buffer is not None:
+            base64_image = base64.b64encode(
+                image_buffer.getvalue()).decode("utf-8")
+        user_message = format_into_message("user", message, base64_image)
+        db.push_new_message(user_message, user_id, chat_id, message_thread_id)
+        dialog_messages.append(user_message)
+
         chatgpt_instance = openai_utils.ChatGPT(model=current_model)
         if config.enable_message_streaming:
             gen = chatgpt_instance.send_message_stream(
-                message, dialog_messages, chat_mode, image_buffer)
+                dialog_messages, chat_mode)
         else:
-            (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed) = await chatgpt_instance.send_message(message, dialog_messages, chat_mode, image_buffer)
+            (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed) = await chatgpt_instance.send_message(dialog_messages, chat_mode)
 
             async def fake_gen():
                 yield answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
@@ -281,30 +310,10 @@ async def message_handle_fn(update: Update, context: CallbackContext, image_buff
             (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed) = await group_stream_response(update, context, gen)
 
         # update user data
-        if image_buffer is not None:
-            base_image = base64.b64encode(
-                image_buffer.getvalue()).decode("utf-8")
-            new_dialog_message = {"user": [
-                {
-                    "type": "text",
-                            "text": message,
-                },
-                {
-                    "type": "image",
-                            "image": base_image,
-                }
-            ], "bot": answer, "date": datetime.now()}
-        else:
-            new_dialog_message = {"user": [
-                {"type": "text", "text": message}], "bot": answer, "date": datetime.now()}
+        assistant_message = format_into_message("assistant", answer)
 
-        db.set_dialog_messages(
-            db.get_dialog_messages(
-                chat_id, message_thread_id) + [new_dialog_message],
-            user_id,
-            chat_id,
-            message_thread_id
-        )
+        db.push_new_message(assistant_message, user_id,
+                            chat_id, message_thread_id)
 
         db.update_n_used_tokens(user_id, current_model,
                                 n_input_tokens, n_output_tokens)
@@ -416,6 +425,7 @@ async def rename_topic(update: Update, context: CallbackContext):
     message = update.message.caption or update.message.text or ''
 
     buf = None
+    base64_image = None
     if update.message.effective_attachment:
         photo = update.message.effective_attachment[-1]
         photo_file = await context.bot.get_file(photo.file_id)
@@ -425,13 +435,18 @@ async def rename_topic(update: Update, context: CallbackContext):
         await photo_file.download_to_memory(buf)
         buf.name = "image.jpg"  # file extension is required
         buf.seek(0)  # move cursor to the beginning of the buffer
+        base64_image = None
+        if buf is not None:
+            base64_image = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    message = format_into_message("user", message, base64_image)
 
     try:
         topic_titler_instance = openai_utils.ChatGPT(model=current_model)
         dialog_messages = db.get_dialog_messages(
             chat_id, message_thread_id)
-        if message_thread_id and len(dialog_messages) == 0:
-            topic_title = await topic_titler_instance.generate_topic_title(message, buf)
+        if message_thread_id and len(dialog_messages) <= 1:
+            topic_title = await topic_titler_instance.generate_topic_title(message)
             await context.bot.edit_forum_topic(chat_id, message_thread_id, topic_title)
     except Exception as e:
         error_text = f"Something went wrong when trying to generate topic title: {str(e)}"

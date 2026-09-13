@@ -1,6 +1,4 @@
 import base64
-from io import BytesIO
-from typing import Optional
 import config
 import logging
 import json
@@ -55,15 +53,14 @@ class ChatGPT:
         self.model = model
         self._client = _get_client_for_model(model)
 
-    async def send_message(self, message, dialog_messages, chat_mode, image_buffer: Optional[BytesIO] = None):
+    async def send_message(self, dialog_messages, chat_mode):
         n_dialog_messages_before = len(dialog_messages)
         answer = None
         prompt = config.chat_modes["info"][chat_mode]["system_prompt"]
         while answer is None:
             try:
                 messages = self._generate_prompt_messages(
-                    message, dialog_messages, prompt, image_buffer
-                )
+                    dialog_messages, prompt)
                 r = await self._client.chat.completions.create(
                     model=self.model,
                     messages=messages,
@@ -88,13 +85,11 @@ class ChatGPT:
 
         return (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed)
 
-    async def send_message_stream(self, message, dialog_messages, chat_mode, image_buffer: Optional[BytesIO] = None):
+    async def send_message_stream(self, dialog_messages, chat_mode):
         n_dialog_messages_before = len(dialog_messages)
         prompt = config.chat_modes["info"][chat_mode]["system_prompt"]
         try:
-            messages = self._generate_prompt_messages(
-                message, dialog_messages, prompt, image_buffer
-            )
+            messages = self._generate_prompt_messages(dialog_messages, prompt)
 
             r_gen = await self._client.chat.completions.create(
                 model=self.model,
@@ -129,7 +124,7 @@ class ChatGPT:
             # forget first message in dialog_messages
             dialog_messages = dialog_messages[1:]
 
-    async def generate_topic_title(self, message, image_buffer: Optional[BytesIO] = None):
+    async def generate_topic_title(self, message):
         json_schema = {
             "name": "generate_topic_title",
             "strict": True,
@@ -149,7 +144,7 @@ class ChatGPT:
         }
 
         messages = self._generate_prompt_messages(
-            message, [], "Generate a concise and descriptive topic title based on the provided image or message.", image_buffer)
+            [message], "Generate a concise and descriptive topic title based on the provided image or message.")
         r = await self._client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -160,41 +155,10 @@ class ChatGPT:
         topic_title = json.loads(r.choices[0].message.content)["topic_title"]
         return topic_title
 
-    def _encode_image(self, image_buffer: BytesIO) -> bytes:
-        return base64.b64encode(image_buffer.read()).decode("utf-8")
+    def _generate_prompt_messages(self, dialog_messages, system_prompt):
+        messages = [{"role": "system", "content": system_prompt}]
 
-    def _generate_prompt_messages(self, message, dialog_messages, prompt, image_buffer: Optional[BytesIO] = None):
-        messages = [{"role": "system", "content": prompt}]
-
-        for dialog_message in dialog_messages:
-            messages.append(
-                {"role": "user", "content": dialog_message["user"]})
-            messages.append(
-                {"role": "assistant", "content": dialog_message["bot"]})
-
-        if image_buffer is not None:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": message,
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-
-                                "url": f"data:image/jpeg;base64,{self._encode_image(image_buffer)}",
-                                "detail": "high"
-                            }
-                        }
-                    ]
-                }
-
-            )
-        else:
-            messages.append({"role": "user", "content": message})
+        messages.extend(dialog_messages)
 
         return messages
 

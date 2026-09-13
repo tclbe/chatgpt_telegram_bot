@@ -117,3 +117,10 @@ class Database:
             {"$set": {"messages": dialog_messages},
                 "$addToSet": {"participants": user_id}}
         )
+
+    def push_new_message(self, message: dict, user_id: int, chat_id: int, message_thread_id: Optional[int] = None):
+        self.dialog_collection.find_one_and_update(
+            {"chat_id": chat_id, "message_thread_id": message_thread_id},
+            {"$push": {"messages": message}, "$addToSet": {"participants": user_id}},
+            sort=[("start_time", pymongo.DESCENDING)]
+        )
