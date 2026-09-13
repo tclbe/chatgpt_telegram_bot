@@ -58,7 +58,7 @@ class ChatGPT:
     async def send_message(self, message, dialog_messages, chat_mode, image_buffer: Optional[BytesIO] = None):
         n_dialog_messages_before = len(dialog_messages)
         answer = None
-        prompt = config.chat_modes["info"][chat_mode]["prompt_start"]
+        prompt = config.chat_modes["info"][chat_mode]["system_prompt"]
         while answer is None:
             try:
                 messages = self._generate_prompt_messages(
@@ -90,7 +90,7 @@ class ChatGPT:
 
     async def send_message_stream(self, message, dialog_messages, chat_mode, image_buffer: Optional[BytesIO] = None):
         n_dialog_messages_before = len(dialog_messages)
-        prompt = config.chat_modes["info"][chat_mode]["prompt_start"]
+        prompt = config.chat_modes["info"][chat_mode]["system_prompt"]
         try:
             messages = self._generate_prompt_messages(
                 message, dialog_messages, prompt, image_buffer
