@@ -385,8 +385,9 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
         if not model_supports_vision and photo_sent:
             # a photo was sent but the selected model can't read images:
             # fall back to a vision-capable default
-            current_model = "gpt-4o"
-            db.set_user_attribute(user_id, "current_model", "gpt-4o")
+            default_vision_model = config.models["default_vision_model"]
+            db.set_user_attribute(
+                user_id, "current_model", default_vision_model)
         task = asyncio.create_task(
             message_handle_fn(update, context, image_buffer))
 

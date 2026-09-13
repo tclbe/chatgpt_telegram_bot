@@ -1,4 +1,5 @@
 default_text_model: "gpt-4o-mini"
+default_vision_model: "gpt-4o-mini"
 
 info:
   gpt-4o:
