@@ -1,10 +1,11 @@
-import io
+from io import BytesIO
 import logging
 import asyncio
 import traceback
 import html
 import json
 from datetime import datetime
+from typing import Optional
 import openai
 
 import telegram
@@ -242,33 +243,14 @@ async def retry_handle(update: Update, context: CallbackContext):
     await message_handle(update, context, message=last_dialog_message["user"])
 
 
-async def _vision_message_handle_fn(update: Update, context: CallbackContext):
+async def message_handle_fn(update: Update, context: CallbackContext, image_buffer=Optional[BytesIO]):
     user_id = update.message.from_user.id
     chat_id = update.message.chat_id
     message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
     current_model = db.get_user_attribute(user_id, "current_model")
-
-    if not config.models["info"][current_model].get("vision", False):
-        await update.message.reply_text(
-            "🥲 Image understanding is only available for <b>vision-capable</b> models (e.g. GPT-4o, GPT-4o mini, GPT-5.5 or Claude). Please change your model in /settings",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-    buf = None
-    if update.message.effective_attachment:
-        photo = update.message.effective_attachment[-1]
-        photo_file = await context.bot.get_file(photo.file_id)
-
-        # store file in memory, not on disk
-        buf = io.BytesIO()
-        await photo_file.download_to_memory(buf)
-        buf.name = "image.jpg"  # file extension is required
-        buf.seek(0)  # move cursor to the beginning of the buffer
 
     # in case of CancelledError
     n_input_tokens, n_output_tokens = 0, 0
@@ -283,48 +265,25 @@ async def _vision_message_handle_fn(update: Update, context: CallbackContext):
 
         chatgpt_instance = openai_utils.ChatGPT(model=current_model)
         if config.enable_message_streaming:
-            gen = chatgpt_instance.send_vision_message_stream(
-                message,
-                dialog_messages=dialog_messages,
-                image_buffer=buf,
-                chat_mode=chat_mode,
-            )
+            gen = chatgpt_instance.send_message_stream(
+                message, dialog_messages, chat_mode, image_buffer)
         else:
-            (
-                answer,
-                (n_input_tokens, n_output_tokens),
-                n_first_dialog_messages_removed,
-            ) = await chatgpt_instance.send_vision_message(
-                message,
-                dialog_messages=dialog_messages,
-                image_buffer=buf,
-                chat_mode=chat_mode,
-            )
+            (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed) = await chatgpt_instance.send_message(message, dialog_messages, chat_mode, image_buffer)
 
             async def fake_gen():
-                yield answer, (
-                    n_input_tokens,
-                    n_output_tokens,
-                ), n_first_dialog_messages_removed
+                yield answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
             gen = fake_gen()
 
         if update.message.chat.type == "private":
-            (
-                answer,
-                (n_input_tokens, n_output_tokens),
-                n_first_dialog_messages_removed
-            ) = await stream_response(update, context, gen)
+            (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed) = await stream_response(update, context, gen)
         else:
-            (
-                answer,
-                (n_input_tokens, n_output_tokens),
-                n_first_dialog_messages_removed
-            ) = await group_stream_response(update, context, gen)
+            (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed) = await group_stream_response(update, context, gen)
 
         # update user data
-        if buf is not None:
-            base_image = base64.b64encode(buf.getvalue()).decode("utf-8")
+        if image_buffer is not None:
+            base_image = base64.b64encode(
+                image_buffer.getvalue()).decode("utf-8")
             new_dialog_message = {"user": [
                 {
                     "type": "text",
@@ -362,6 +321,14 @@ async def _vision_message_handle_fn(update: Update, context: CallbackContext):
         await update.message.reply_text(error_text)
         return
 
+    # send message if some messages were removed from the context
+    if n_first_dialog_messages_removed > 0:
+        if n_first_dialog_messages_removed == 1:
+            text = "✍️ <i>Note:</i> Your current dialog is too long, so your <b>first message</b> was removed from the context.\n Send /new command to start new dialog"
+        else:
+            text = f"✍️ <i>Note:</i> Your current dialog is too long, so <b>{n_first_dialog_messages_removed} first messages</b> were removed from the context.\n Send /new command to start new dialog"
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
 
 async def unsupport_message_handle(update: Update, context: CallbackContext, message=None):
     # check if bot was mentioned (for group chats)
@@ -386,17 +353,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
 
     _message = message or update.message.text
 
-    # remove bot mention (in group chats)
-    if update.message.chat.type != "private":
-        _message = _message.replace("@" + context.bot.username, "").strip()
-
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context):
         return
 
     user_id = update.message.from_user.id
-    chat_id = update.message.chat_id
-    message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
     if chat_mode == "artist":
@@ -405,102 +366,29 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
 
     current_model = db.get_user_attribute(user_id, "current_model")
 
-    async def message_handle_fn():
-        db.set_user_attribute(user_id, "last_interaction", datetime.now())
+    image_buffer = None
+    if update.message.effective_attachment:
+        photo = update.message.effective_attachment[-1]
+        photo_file = await context.bot.get_file(photo.file_id)
 
-        # in case of CancelledError
-        n_input_tokens, n_output_tokens = 0, 0
-
-        try:
-            # send typing action
-            await update.message.chat.send_action(action="typing")
-
-            if _message is None or len(_message) == 0:
-                await update.message.reply_text("🥲 You sent <b>empty message</b>. Please, try again!", parse_mode=ParseMode.HTML)
-                return
-
-            dialog_messages = db.get_dialog_messages(
-                chat_id, message_thread_id)
-
-            chatgpt_instance = openai_utils.ChatGPT(model=current_model)
-            if config.enable_message_streaming:
-                gen = chatgpt_instance.send_message_stream(
-                    _message, dialog_messages=dialog_messages, chat_mode=chat_mode)
-            else:
-                answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed = await chatgpt_instance.send_message(
-                    _message,
-                    dialog_messages=dialog_messages,
-                    chat_mode=chat_mode
-                )
-
-                async def fake_gen():
-                    yield answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-
-                gen = fake_gen()
-
-            if update.message.chat.type == "private":
-                (
-                    answer,
-                    (n_input_tokens, n_output_tokens),
-                    n_first_dialog_messages_removed
-                ) = await stream_response(update, context, gen)
-            else:
-                (
-                    answer,
-                    (n_input_tokens, n_output_tokens),
-                    n_first_dialog_messages_removed
-                ) = await group_stream_response(update, context, gen)
-
-            # update user data
-            new_dialog_message = {"user": [
-                {"type": "text", "text": _message}], "bot": answer, "date": datetime.now()}
-
-            db.set_dialog_messages(
-                db.get_dialog_messages(
-                    chat_id, message_thread_id) + [new_dialog_message],
-                user_id,
-                chat_id,
-                message_thread_id
-            )
-
-            db.update_n_used_tokens(
-                user_id, current_model, n_input_tokens, n_output_tokens)
-
-        except asyncio.CancelledError:
-            # note: intermediate token updates only work when enable_message_streaming=True (config.yml)
-            db.update_n_used_tokens(
-                user_id, current_model, n_input_tokens, n_output_tokens)
-            raise
-
-        except Exception as e:
-            error_text = f"Something went wrong during completion. Reason: {e}"
-            logger.exception(e)
-            await update.message.reply_text(error_text)
-            return
-
-        # send message if some messages were removed from the context
-        if n_first_dialog_messages_removed > 0:
-            if n_first_dialog_messages_removed == 1:
-                text = "✍️ <i>Note:</i> Your current dialog is too long, so your <b>first message</b> was removed from the context.\n Send /new command to start new dialog"
-            else:
-                text = f"✍️ <i>Note:</i> Your current dialog is too long, so <b>{n_first_dialog_messages_removed} first messages</b> were removed from the context.\n Send /new command to start new dialog"
-            await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        # store file in memory, not on disk
+        image_buffer = BytesIO()
+        await photo_file.download_to_memory(image_buffer)
+        image_buffer.name = "image.jpg"  # file extension is required
+        image_buffer.seek(0)  # move cursor to the beginning of the buffer
 
     async with user_semaphores[user_id]:
         model_supports_vision = config.models["info"][current_model].get(
             "vision", False)
         photo_sent = update.message.photo is not None and len(
             update.message.photo) > 0
-        if model_supports_vision or photo_sent:
-            if not model_supports_vision:
-                # a photo was sent but the selected model can't read images:
-                # fall back to a vision-capable default
-                current_model = "gpt-4o"
-                db.set_user_attribute(user_id, "current_model", "gpt-4o")
-            task = asyncio.create_task(_vision_message_handle_fn(update, context)
-                                       )
-        else:
-            task = asyncio.create_task(message_handle_fn())
+        if not model_supports_vision and photo_sent:
+            # a photo was sent but the selected model can't read images:
+            # fall back to a vision-capable default
+            current_model = "gpt-4o"
+            db.set_user_attribute(user_id, "current_model", "gpt-4o")
+        task = asyncio.create_task(
+            message_handle_fn(update, context, image_buffer))
 
         user_tasks[user_id] = task
 
@@ -532,7 +420,7 @@ async def rename_topic(update: Update, context: CallbackContext):
         photo_file = await context.bot.get_file(photo.file_id)
 
         # store file in memory, not on disk
-        buf = io.BytesIO()
+        buf = BytesIO()
         await photo_file.download_to_memory(buf)
         buf.name = "image.jpg"  # file extension is required
         buf.seek(0)  # move cursor to the beginning of the buffer
@@ -579,7 +467,7 @@ async def voice_message_handle(update: Update, context: CallbackContext):
     voice_file = await context.bot.get_file(voice.file_id)
 
     # store file in memory, not on disk
-    buf = io.BytesIO()
+    buf = BytesIO()
     await voice_file.download_to_memory(buf)
     buf.name = "voice.oga"  # file extension is required
     buf.seek(0)  # move cursor to the beginning of the buffer
@@ -623,7 +511,7 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
 
     for image in images:
         await update.message.chat.send_action(action="upload_photo")
-        await update.message.reply_photo(io.BytesIO(image))
+        await update.message.reply_photo(BytesIO(image))
 
 
 async def new_dialog_handle(update: Update, context: CallbackContext):

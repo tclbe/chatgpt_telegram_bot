@@ -55,118 +55,24 @@ class ChatGPT:
         self.model = model
         self._client = _get_client_for_model(model)
 
-    async def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
-        if chat_mode not in config.chat_modes["info"].keys():
-            raise ValueError(f"Chat mode {chat_mode} is not supported")
-
+    async def send_message(self, message, dialog_messages, chat_mode, image_buffer: Optional[BytesIO] = None):
         n_dialog_messages_before = len(dialog_messages)
         answer = None
         prompt = config.chat_modes["info"][chat_mode]["prompt_start"]
         while answer is None:
             try:
-                if config.models["info"][self.model]["type"] == "text":
-                    messages = self._generate_prompt_messages(
-                        message, dialog_messages, prompt)
-
-                    r = await self._client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        **OPENAI_COMPLETION_OPTIONS
-                    )
-                    answer = r.choices[0].message.content
-                else:
-                    raise ValueError(f"Unknown model: {self.model}")
+                messages = self._generate_prompt_messages(
+                    message, dialog_messages, prompt, image_buffer
+                )
+                r = await self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    **OPENAI_COMPLETION_OPTIONS
+                )
+                answer = r.choices[0].message.content
 
                 answer = self._postprocess_answer(answer)
                 n_input_tokens, n_output_tokens = r.usage.prompt_tokens, r.usage.completion_tokens
-            except BadRequestError as e:  # too many tokens
-                if len(dialog_messages) == 0:
-                    raise ValueError(
-                        "Dialog messages is reduced to zero, but still has too many tokens to make completion") from e
-
-                # forget first message in dialog_messages
-                dialog_messages = dialog_messages[1:]
-
-        n_first_dialog_messages_removed = n_dialog_messages_before - \
-            len(dialog_messages)
-
-        return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-
-    async def send_message_stream(self, message, dialog_messages=[], chat_mode="assistant"):
-        if chat_mode not in config.chat_modes["info"].keys():
-            raise ValueError(f"Chat mode {chat_mode} is not supported")
-
-        n_dialog_messages_before = len(dialog_messages)
-        prompt = config.chat_modes["info"][chat_mode]["prompt_start"]
-        try:
-            if config.models["info"][self.model]["type"] == "text":
-                messages = self._generate_prompt_messages(
-                    message, dialog_messages, prompt)
-
-                r_gen = await self._client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    **OPENAI_COMPLETION_OPTIONS
-                )
-
-                async for r_item in r_gen:
-                    if len(r_item.choices) > 0:
-                        # Generating response, get delta
-                        n_input_tokens = 0
-                        n_output_tokens = 0
-                        delta = r_item.choices[0].delta
-                        response = getattr(delta, "content", "")
-                    else:
-                        # End of response, get usage data
-                        n_input_tokens = r_item.usage.prompt_tokens
-                        n_output_tokens = r_item.usage.completion_tokens
-                        response = ""
-
-                    n_first_dialog_messages_removed = (
-                        n_dialog_messages_before - len(dialog_messages)
-                    )
-
-                    yield response, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-
-        except BadRequestError as e:  # too many tokens
-            if len(dialog_messages) == 0:
-                raise e
-
-            # forget first message in dialog_messages
-            dialog_messages = dialog_messages[1:]
-
-    async def send_vision_message(
-        self,
-        message,
-        dialog_messages=[],
-        chat_mode="assistant",
-        image_buffer: BytesIO = None,
-    ):
-        n_dialog_messages_before = len(dialog_messages)
-        answer = None
-        prompt = config.chat_modes["info"][chat_mode]["prompt_start"]
-        while answer is None:
-            try:
-                if config.models["info"][self.model].get("vision", False):
-                    messages = self._generate_prompt_messages(
-                        message, dialog_messages, prompt, image_buffer
-                    )
-                    r = await self._client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        **OPENAI_COMPLETION_OPTIONS
-                    )
-                    answer = r.choices[0].message.content
-                else:
-                    raise ValueError(f"Unsupported model: {self.model}")
-
-                answer = self._postprocess_answer(answer)
-                n_input_tokens, n_output_tokens = (
-                    r.usage.prompt_tokens,
-                    r.usage.completion_tokens,
-                )
             except BadRequestError as e:  # too many tokens
                 if len(dialog_messages) == 0:
                     raise ValueError(
@@ -182,47 +88,40 @@ class ChatGPT:
 
         return (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed)
 
-    async def send_vision_message_stream(
-        self,
-        message,
-        dialog_messages=[],
-        chat_mode="assistant",
-        image_buffer: Optional[BytesIO] = None,
-    ):
+    async def send_message_stream(self, message, dialog_messages, chat_mode, image_buffer: Optional[BytesIO] = None):
         n_dialog_messages_before = len(dialog_messages)
         prompt = config.chat_modes["info"][chat_mode]["prompt_start"]
         try:
-            if config.models["info"][self.model].get("vision", False):
-                messages = self._generate_prompt_messages(
-                    message, dialog_messages, prompt, image_buffer
+            messages = self._generate_prompt_messages(
+                message, dialog_messages, prompt, image_buffer
+            )
+
+            r_gen = await self._client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=True,
+                stream_options={"include_usage": True},
+                **OPENAI_COMPLETION_OPTIONS,
+            )
+
+            async for r_item in r_gen:
+                if len(r_item.choices) > 0:
+                    # Generating response, get delta
+                    n_input_tokens = 0
+                    n_output_tokens = 0
+                    delta = r_item.choices[0].delta
+                    response = getattr(delta, "content", "")
+                else:
+                    # End of response, get usage data
+                    n_input_tokens = r_item.usage.prompt_tokens
+                    n_output_tokens = r_item.usage.completion_tokens
+                    response = ""
+
+                n_first_dialog_messages_removed = (
+                    n_dialog_messages_before - len(dialog_messages)
                 )
 
-                r_gen = await self._client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    **OPENAI_COMPLETION_OPTIONS,
-                )
-
-                async for r_item in r_gen:
-                    if len(r_item.choices) > 0:
-                        # Generating response, get delta
-                        n_input_tokens = 0
-                        n_output_tokens = 0
-                        delta = r_item.choices[0].delta
-                        response = getattr(delta, "content", "")
-                    else:
-                        # End of response, get usage data
-                        n_input_tokens = r_item.usage.prompt_tokens
-                        n_output_tokens = r_item.usage.completion_tokens
-                        response = ""
-
-                    n_first_dialog_messages_removed = (
-                        n_dialog_messages_before - len(dialog_messages)
-                    )
-
-                    yield response, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+                yield response, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
         except BadRequestError as e:  # too many tokens
             if len(dialog_messages) == 0:
