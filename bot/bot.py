@@ -150,6 +150,22 @@ def split_text_into_chunks(text, chunk_size):
         yield text[i:i + chunk_size]
 
 
+async def update_to_base64(update: Update, context: CallbackContext):
+    if update.message.effective_attachment:
+        photo = update.message.effective_attachment[-1]
+        photo_file = await context.bot.get_file(photo.file_id)
+
+        # store file in memory, not on disk
+        buf = BytesIO()
+        await photo_file.download_to_memory(buf)
+        buf.name = "image.jpg"  # file extension is required
+        buf.seek(0)  # move cursor to the beginning of the buffer
+
+        if buf is not None:
+            base64_image = base64.b64encode(buf.getvalue()).decode("utf-8")
+            return base64_image
+
+
 async def register_user_if_not_exists(update: Update, context: CallbackContext, user: User):
     if not db.check_if_user_exists(user.id):
         db.add_new_user(
@@ -264,7 +280,7 @@ async def retry_handle(update: Update, context: CallbackContext):
     await message_handle(update, context, message=last_dialog_message["user"])
 
 
-async def message_handle_fn(update: Update, context: CallbackContext, image_buffer=Optional[BytesIO]):
+async def chat_completion_handle(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     chat_id = update.message.chat_id
     message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
@@ -284,10 +300,7 @@ async def message_handle_fn(update: Update, context: CallbackContext, image_buff
 
         dialog_messages = db.get_dialog_messages(chat_id, message_thread_id)
 
-        base64_image = None
-        if image_buffer is not None:
-            base64_image = base64.b64encode(
-                image_buffer.getvalue()).decode("utf-8")
+        base64_image = await update_to_base64(update, context)
         user_message = format_into_message("user", message, base64_image)
         db.push_new_message(user_message, user_id, chat_id, message_thread_id)
         dialog_messages.append(user_message)
@@ -360,8 +373,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
         await edited_message_handle(update, context)
         return
 
-    _message = message or update.message.text
-
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context):
         return
@@ -375,17 +386,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
 
     current_model = db.get_user_attribute(user_id, "current_model")
 
-    image_buffer = None
-    if update.message.effective_attachment:
-        photo = update.message.effective_attachment[-1]
-        photo_file = await context.bot.get_file(photo.file_id)
-
-        # store file in memory, not on disk
-        image_buffer = BytesIO()
-        await photo_file.download_to_memory(image_buffer)
-        image_buffer.name = "image.jpg"  # file extension is required
-        image_buffer.seek(0)  # move cursor to the beginning of the buffer
-
     async with user_semaphores[user_id]:
         model_supports_vision = config.models["info"][current_model].get(
             "vision", False)
@@ -398,7 +398,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
             db.set_user_attribute(
                 user_id, "current_model", default_vision_model)
         task = asyncio.create_task(
-            message_handle_fn(update, context, image_buffer))
+            chat_completion_handle(update, context))
 
         user_tasks[user_id] = task
 
@@ -424,20 +424,7 @@ async def rename_topic(update: Update, context: CallbackContext):
     current_model = db.get_user_attribute(user_id, "current_model")
     message = update.message.caption or update.message.text or ''
 
-    buf = None
-    base64_image = None
-    if update.message.effective_attachment:
-        photo = update.message.effective_attachment[-1]
-        photo_file = await context.bot.get_file(photo.file_id)
-
-        # store file in memory, not on disk
-        buf = BytesIO()
-        await photo_file.download_to_memory(buf)
-        buf.name = "image.jpg"  # file extension is required
-        buf.seek(0)  # move cursor to the beginning of the buffer
-        base64_image = None
-        if buf is not None:
-            base64_image = base64.b64encode(buf.getvalue()).decode("utf-8")
+    base64_image = await update_to_base64(update, context)
 
     message = format_into_message("user", message, base64_image)
 
