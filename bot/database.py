@@ -109,6 +109,9 @@ class Database:
             sort=[("start_time", pymongo.DESCENDING)]
         )
 
+        if not dialog_dict:
+            return []
+
         return dialog_dict["messages"]
 
     def set_dialog_messages(self, dialog_messages: list, user_id: int, chat_id: int, message_thread_id: Optional[int] = None):

@@ -176,7 +176,7 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
         )
 
     if user.id not in user_semaphores:
-        user_semaphores[user.id] = asyncio.Semaphore(2)
+        user_semaphores[user.id] = asyncio.Semaphore(1)
 
     if db.get_user_attribute(user.id, "current_model") is None:
         db.set_user_attribute(user.id, "current_model",
@@ -273,14 +273,17 @@ async def retry_handle(update: Update, context: CallbackContext):
         return
 
     last_dialog_message = dialog_messages.pop()
-    # last message was removed from the context
+    # Remove messages until last user message is found.
+    while len(dialog_messages) > 0 and last_dialog_message["role"] != "user":
+        last_dialog_message = dialog_messages.pop()
+
     db.set_dialog_messages(dialog_messages, user_id,
                            chat_id,  message_thread_id)
 
-    await message_handle(update, context, message=last_dialog_message["user"])
+    await message_handle(update, context, message=last_dialog_message)
 
 
-async def chat_completion_handle(update: Update, context: CallbackContext):
+async def chat_completion_handle(update: Update, context: CallbackContext, user_message: dict):
     user_id = update.message.from_user.id
     chat_id = update.message.chat_id
     message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
@@ -293,15 +296,10 @@ async def chat_completion_handle(update: Update, context: CallbackContext):
     n_input_tokens, n_output_tokens = 0, 0
 
     try:
-        message = update.message.caption or update.message.text or ''
-
         # send typing action
         await update.message.chat.send_action(action="typing")
 
         dialog_messages = db.get_dialog_messages(chat_id, message_thread_id)
-
-        base64_image = await update_to_base64(update, context)
-        user_message = format_into_message("user", message, base64_image)
         db.push_new_message(user_message, user_id, chat_id, message_thread_id)
         dialog_messages.append(user_message)
 
@@ -363,7 +361,7 @@ async def unsupport_message_handle(update: Update, context: CallbackContext, mes
     return
 
 
-async def message_handle(update: Update, context: CallbackContext, message=None):
+async def message_handle(update: Update, context: CallbackContext, message: dict = None):
     # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
         return
@@ -386,6 +384,10 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
 
     current_model = db.get_user_attribute(user_id, "current_model")
 
+    if not message and update.message.is_topic_message:
+        task_title = asyncio.create_task(rename_topic(update, context))
+        await task_title
+
     async with user_semaphores[user_id]:
         model_supports_vision = config.models["info"][current_model].get(
             "vision", False)
@@ -397,14 +399,18 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
             default_vision_model = config.models["default_vision_model"]
             db.set_user_attribute(
                 user_id, "current_model", default_vision_model)
+
+        if not message:
+            message = update.message.caption or update.message.text or ''
+            base64_image = await update_to_base64(update, context)
+            user_message = format_into_message("user", message, base64_image)
+        else:
+            user_message = message
+
         task = asyncio.create_task(
-            chat_completion_handle(update, context))
+            chat_completion_handle(update, context, user_message))
 
         user_tasks[user_id] = task
-
-        if update.message.is_topic_message:
-            task_title = asyncio.create_task(rename_topic(update, context))
-            await task_title
 
         try:
             await task
