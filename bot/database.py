@@ -1,4 +1,4 @@
-from typing import Optional, Any
+from typing import Any
 
 import pymongo
 import uuid
@@ -103,7 +103,7 @@ class Database:
 
         self.set_user_attribute(user_id, "n_used_tokens", n_used_tokens_dict)
 
-    def get_dialog_messages(self, chat_id: int, message_thread_id: Optional[int] = None):
+    def get_dialog_messages(self, chat_id: int, message_thread_id: int | None = None):
         dialog_dict = self.dialog_collection.find_one(
             {"chat_id": chat_id, "message_thread_id": message_thread_id},
             sort=[("start_time", pymongo.DESCENDING)]
@@ -114,14 +114,14 @@ class Database:
 
         return dialog_dict["messages"]
 
-    def set_dialog_messages(self, dialog_messages: list, user_id: int, chat_id: int, message_thread_id: Optional[int] = None):
+    def set_dialog_messages(self, dialog_messages: list, user_id: int, chat_id: int, message_thread_id: int | None = None):
         self.dialog_collection.update_one(
             {"chat_id": chat_id, "message_thread_id": message_thread_id},
             {"$set": {"messages": dialog_messages},
                 "$addToSet": {"participants": user_id}}
         )
 
-    def push_new_message(self, message: dict, user_id: int, chat_id: int, message_thread_id: Optional[int] = None):
+    def push_new_message(self, message: dict, user_id: int, chat_id: int, message_thread_id: int | None = None):
         self.dialog_collection.find_one_and_update(
             {"chat_id": chat_id, "message_thread_id": message_thread_id},
             {"$push": {"messages": message}, "$addToSet": {"participants": user_id}},

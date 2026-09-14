@@ -5,7 +5,6 @@ import traceback
 import html
 import json
 from datetime import datetime
-from typing import Optional
 import openai
 
 import telegram
@@ -130,7 +129,7 @@ async def group_stream_response(update: Update, context: CallbackContext, respon
         return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
 
-def format_into_message(role: str, text: str, base64_image: Optional[str] = None):
+def format_into_message(role: str, text: str, base64_image: str | None = None):
     if base64_image:
         message = {
             "role": role,
