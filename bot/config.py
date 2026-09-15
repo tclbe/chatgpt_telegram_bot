@@ -26,6 +26,7 @@ n_chat_modes_per_page = config_yaml.get("n_chat_modes_per_page", 5)
 mongodb_uri = f"mongodb://mongo:{config_env['MONGODB_PORT']}"
 HELP_MESSAGE = config_yaml["help_message"]
 HELP_GROUP_CHAT_MESSAGE = config_yaml["help_group_chat_message"]
+OPENAI_COMPLETION_OPTIONS = config_yaml["openai_completion_settings"]
 
 # chat_modes
 with open(config_dir / "chat_modes.yml", 'r') as f:

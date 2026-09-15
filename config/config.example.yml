@@ -33,4 +33,12 @@ help_group_chat_message: |
   To get a reply from the bot in the chat – @ <b>tag</b> it or <b>reply</b> to its message.
   For example: "{bot_username} write a poem about Telegram"
 
+openai_completion_settings:
+  temperature: 0.7
+  max_completion_tokens: 10000
+  top_p: 1
+  frequency_penalty: 0
+  presence_penalty: 0
+  timeout: 60.0
+
 # Note: model prices are configured per-model in config/models.yml

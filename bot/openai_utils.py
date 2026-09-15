@@ -37,16 +37,6 @@ def _get_client_for_model(model):
     return openai_client
 
 
-OPENAI_COMPLETION_OPTIONS = {
-    "temperature": 0.7,
-    "max_tokens": 1000,
-    "top_p": 1,
-    "frequency_penalty": 0,
-    "presence_penalty": 0,
-    "timeout": 60.0,
-}
-
-
 class ChatGPT:
     def __init__(self, model="gpt-4o-mini"):
         assert model in config.models["info"], f"Unknown model: {model}"
@@ -64,7 +54,7 @@ class ChatGPT:
                 r = await self._client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    **OPENAI_COMPLETION_OPTIONS
+                    **config.OPENAI_COMPLETION_OPTIONS
                 )
                 answer = r.choices[0].message.content
 
@@ -96,7 +86,7 @@ class ChatGPT:
                 messages=messages,
                 stream=True,
                 stream_options={"include_usage": True},
-                **OPENAI_COMPLETION_OPTIONS,
+                **config.OPENAI_COMPLETION_OPTIONS,
             )
 
             async for r_item in r_gen:
@@ -150,7 +140,7 @@ class ChatGPT:
             messages=messages,
             response_format={"type": "json_schema",
                              "json_schema": json_schema},
-            **OPENAI_COMPLETION_OPTIONS
+            **config.OPENAI_COMPLETION_OPTIONS
         )
         topic_title = json.loads(r.choices[0].message.content)["topic_title"]
         return topic_title
