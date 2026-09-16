@@ -228,7 +228,7 @@ async def help_group_chat_handle(update: Update, context: CallbackContext):
         bot_username="@" + context.bot.username)
 
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-    await update.message.reply_video(config.help_group_chat_video_path)
+    await update.message.reply_video(config.HELP_GROUP_CHAT_VIDEO_PATH)
 
 
 async def retry_handle(update: Update, context: CallbackContext):
@@ -279,7 +279,7 @@ async def chat_completion_handle(update: Update, context: CallbackContext, user_
         dialog_messages.append(user_message)
 
         chatgpt_instance = openai_utils.ChatGPT(model=current_model)
-        if config.enable_message_streaming:
+        if config.ENABLE_MESSAGE_STREAMING:
             gen = chatgpt_instance.send_message_stream(
                 dialog_messages, chat_mode)
         else:
@@ -480,7 +480,7 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
     message = message or update.message.text
 
     try:
-        images = await openai_utils.generate_images(message, n_images=config.return_n_generated_images, size=config.image_size)
+        images = await openai_utils.generate_images(message, n_images=config.RETURN_N_GENERATED_IMAGES, size=config.IMAGE_SIZE)
     except openai.BadRequestError as e:
         if str(e).startswith("Your request was rejected as a result of our safety system"):
             text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh?"
@@ -543,13 +543,13 @@ async def cancel_handle(update: Update, context: CallbackContext):
 
 
 def get_chat_mode_menu(page_index: int):
-    n_chat_modes_per_page = config.n_chat_modes_per_page
+    N_CHAT_MODES_PER_PAGE = config.N_CHAT_MODES_PER_PAGE
     text = f"Select <b>chat mode</b> ({len(config.chat_modes["info"])} modes available):"
 
     # buttons
     chat_mode_keys = list(config.chat_modes["info"].keys())
     page_chat_mode_keys = chat_mode_keys[page_index *
-                                         n_chat_modes_per_page:(page_index + 1) * n_chat_modes_per_page]
+                                         N_CHAT_MODES_PER_PAGE:(page_index + 1) * N_CHAT_MODES_PER_PAGE]
 
     keyboard = []
     for chat_mode_key in page_chat_mode_keys:
@@ -558,10 +558,10 @@ def get_chat_mode_menu(page_index: int):
             chat_mode_name, callback_data=f"set_chat_mode|{chat_mode_key}")])
 
     # pagination
-    if len(chat_mode_keys) > n_chat_modes_per_page:
+    if len(chat_mode_keys) > N_CHAT_MODES_PER_PAGE:
         is_first_page = (page_index == 0)
         is_last_page = ((page_index + 1) *
-                        n_chat_modes_per_page >= len(chat_mode_keys))
+                        N_CHAT_MODES_PER_PAGE >= len(chat_mode_keys))
 
         if is_first_page:
             keyboard.append([
@@ -805,7 +805,7 @@ async def post_init(application: Application):
 def run_bot() -> None:
     application = (
         ApplicationBuilder()
-        .token(config.telegram_token)
+        .token(config.TELEGRAM_TOKEN)
         .concurrent_updates(True)
         .rate_limiter(AIORateLimiter(max_retries=5))
         .http_version("1.1")
@@ -816,11 +816,11 @@ def run_bot() -> None:
 
     # add handlers
     user_filter = filters.ALL
-    if len(config.allowed_telegram_usernames) > 0:
+    if len(config.ALLOWED_TELEGRAM_USERNAMES) > 0:
         usernames = [
-            x for x in config.allowed_telegram_usernames if isinstance(x, str)]
+            x for x in config.ALLOWED_TELEGRAM_USERNAMES if isinstance(x, str)]
         any_ids = [
-            x for x in config.allowed_telegram_usernames if isinstance(x, int)]
+            x for x in config.ALLOWED_TELEGRAM_USERNAMES if isinstance(x, int)]
         user_ids = [x for x in any_ids if x > 0]
         group_ids = [x for x in any_ids if x < 0]
         user_filter = filters.User(username=usernames) | filters.User(

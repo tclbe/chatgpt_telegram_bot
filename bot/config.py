@@ -12,18 +12,18 @@ with open(config_dir / "config.yml", 'r') as f:
 config_env = dotenv.dotenv_values(config_dir / "config.env")
 
 # config parameters
-telegram_token = config_yaml["telegram_token"]
-openai_api_key = config_yaml["openai_api_key"]
-openai_api_base = config_yaml.get("openai_api_base", None)
-openrouter_api_key = config_yaml.get("openrouter_api_key", None)
-openrouter_api_base = config_yaml.get(
+TELEGRAM_TOKEN = config_yaml["telegram_token"]
+OPENAI_API_KEY = config_yaml["openai_api_key"]
+OPENAI_API_BASE = config_yaml.get("openai_api_base", None)
+OPENROUTER_API_KEY = config_yaml.get("openrouter_api_key", None)
+OPENROUTER_API_BASE = config_yaml.get(
     "openrouter_api_base", "https://openrouter.ai/api/v1")
-allowed_telegram_usernames = config_yaml["allowed_telegram_usernames"]
-enable_message_streaming = config_yaml.get("enable_message_streaming", True)
-return_n_generated_images = config_yaml.get("return_n_generated_images", 1)
-image_size = config_yaml.get("image_size", "1024x1024")
-n_chat_modes_per_page = config_yaml.get("n_chat_modes_per_page", 5)
-mongodb_uri = f"mongodb://mongo:{config_env['MONGODB_PORT']}"
+ALLOWED_TELEGRAM_USERNAMES = config_yaml["allowed_telegram_usernames"]
+ENABLE_MESSAGE_STREAMING = config_yaml.get("enable_message_streaming", True)
+RETURN_N_GENERATED_IMAGES = config_yaml.get("return_n_generated_images", 1)
+IMAGE_SIZE = config_yaml.get("image_size", "1024x1024")
+N_CHAT_MODES_PER_PAGE = config_yaml.get("n_chat_modes_per_page", 5)
+MONGODB_URI = f"mongodb://mongo:{config_env['MONGODB_PORT']}"
 HELP_MESSAGE = config_yaml["help_message"]
 HELP_GROUP_CHAT_MESSAGE = config_yaml["help_group_chat_message"]
 OPENAI_COMPLETION_OPTIONS = config_yaml["openai_completion_settings"]
@@ -37,5 +37,5 @@ with open(config_dir / "models.yml", 'r') as f:
     models = yaml.safe_load(f)
 
 # files
-help_group_chat_video_path = Path(
+HELP_GROUP_CHAT_VIDEO_PATH = Path(
     __file__).parent.parent.resolve() / "static" / "help_group_chat.mp4"

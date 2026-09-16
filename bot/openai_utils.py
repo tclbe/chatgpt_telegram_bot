@@ -9,17 +9,17 @@ from openai import AsyncOpenAI, BadRequestError
 
 # setup openai client
 openai_client = AsyncOpenAI(
-    api_key=config.openai_api_key,
-    base_url=config.openai_api_base,
+    api_key=config.OPENAI_API_KEY,
+    base_url=config.OPENAI_API_BASE,
 )
 
 # optional OpenRouter client (OpenAI-compatible) for models declared with
 # "provider: openrouter" in config/models.yml (e.g. Claude or other vendors)
 openrouter_client = None
-if config.openrouter_api_key:
+if config.OPENROUTER_API_KEY:
     openrouter_client = AsyncOpenAI(
-        api_key=config.openrouter_api_key,
-        base_url=config.openrouter_api_base,
+        api_key=config.OPENROUTER_API_KEY,
+        base_url=config.OPENROUTER_API_BASE,
     )
 
 logger = logging.getLogger(__name__)
